@@ -92,17 +92,18 @@ function assignOffDays(
   };
 
   // 날짜 선택 점수 — 낮을수록 우선 배정
-  //   • 하루 off 인원 × 10              (균등 분산)
-  //   • cap 초과 시 +500                (soft cap 페널티)
-  //   • 평일 off 하한 미달 시 -2        (평일 우선 보너스)
-  //   • 주말 off 상한 초과 시 +200      (주말 과다 방지)
-  //   • 패턴별 연속 페널티/보너스        (개인 선호 반영)
-  //   • 직전 4일 이상 근무 시 -300      (연속 근무 해소 우선)
-  //   • 직전 3일 근무 시 -30            (연속 근무 완화)
+  //   • 하루 off 인원 × 10                  (균등 분산)
+  //   • cap 초과 시 +50000 / 근접 시 +100   (±1 편차 강제)
+  //   • 평일 off 하한 미달 시 -2            (평일 우선 보너스)
+  //   • 주말 off 상한 초과 시 +200          (주말 과다 방지)
+  //   • 패턴별 연속 페널티/보너스            (개인 선호 반영)
+  //   • 연속 근무 한계(패턴별) 도달 시 -300 (연속 근무 해소 우선)
+  //   • 한계 1일 전 -30                     (연속 근무 완화)
   const dayScore = (personId: string, ds: string): number => {
     const cnt         = offCountOnDay(ds);
     const cap         = perDateOffCap?.[ds] ?? maxOffPerDay;
-    const capPenalty  = cnt >= cap ? 500 : 0;
+    // ±1 편차 강제: cap 초과는 사실상 금지, cap 근접도 강력 억제
+    const capPenalty  = cnt >= cap ? 50000 : cnt >= cap - 1 ? 100 : 0;
     const wkdayBonus  = !isWknd(ds) && weekdayOffCount[personId] < weekdayTarget ? -2 : 0;
     const wkndPenalty =  isWknd(ds) && weekendOffCount[personId] >= weekendTarget ? 200 : 0;
     const runLen      = consecOffRun(personId, ds);
@@ -113,7 +114,9 @@ function assignOffDays(
       ? (runLen >= 3 ? 3000 : runLen === 2 ? -400 : 0)
       : (runLen >= 2 ? 2000 : 0);
     const cWork       = leadingWork(personId, ds);
-    const longWorkB   = cWork >= 4 ? -300 : cWork >= 3 ? -30 : 0;
+    // 패턴별 연속 근무 한계: consecutive=5일, spread(기본)=3일
+    const maxCW       = pattern === 'consecutive' ? 5 : 3;
+    const longWorkB   = cWork >= maxCW ? -300 : cWork >= maxCW - 1 ? -30 : 0;
     return cnt * 10 + capPenalty + wkdayBonus + wkndPenalty + consecOffP + longWorkB;
   };
 
@@ -210,24 +213,29 @@ function assignOffDays(
     const rid = p.id;
     const reqLeaves = config?.requestedLeaves[rid] ?? [];
 
-    // 스왑 후 새로운 5연속 근무가 생기는지 확인하는 헬퍼
-    const wouldCreate5Consec = (ds: string): boolean => {
+    // 패턴별 최대 연속 근무일: consecutive=5일, spread(기본)=3일
+    const maxConsecWork = offPatternMap[rid] === 'consecutive' ? 5 : 3;
+
+    // 스왑 후 새로운 초과 연속 근무가 생기는지 확인하는 헬퍼
+    const wouldCreateExcessConsec = (ds: string): boolean => {
       const si = dateIdx[ds];
       let before = 0;
       for (let j = si - 1; j >= 0 && !offMap[rid].has(dateStrs[j]); j--) before++;
       let after = 0;
       for (let j = si + 1; j < dateStrs.length && !offMap[rid].has(dateStrs[j]); j++) after++;
-      return before + 1 + after >= 5;
+      return before + 1 + after >= maxConsecWork + 1;
     };
 
-    // 4a: 5일 연속 근무 → 5번째 날 강제 휴무 (필요 시 다른 off 와 스왑)
+    // 4a: 패턴별 한계 초과 연속 근무 → 한계+1 번째 날 강제 휴무 (필요 시 스왑)
     // 최대 반복 횟수 제한: 날수 × 2 (무한 루프 방지)
     let changed = true;
     let iterLimit4a = dateStrs.length * 2;
     while (changed && iterLimit4a-- > 0) {
       changed = false;
-      for (let i = 4; i < dateStrs.length; i++) {
-        const allWork = [0,1,2,3,4].every(k => !offMap[rid].has(dateStrs[i - k]));
+      for (let i = maxConsecWork; i < dateStrs.length; i++) {
+        // maxConsecWork+1 연속 근무 감지
+        const allWork = Array.from({ length: maxConsecWork + 1 }, (_, k) => k)
+          .every(k => !offMap[rid].has(dateStrs[i - k]));
         if (!allWork) continue;
 
         const forceDs = dateStrs[i];
@@ -238,20 +246,20 @@ function assignOffDays(
         if (budget[rid] > 0) {
           markOff(rid, forceDs);
         } else {
-          // 예산 소진 → 이동해도 새 5연속을 만들지 않는 off를 forceDs로 이동
+          // 예산 소진 → 이동해도 새 초과 연속을 만들지 않는 off를 forceDs로 이동
           const fi = dateIdx[forceDs];
           const swapSrc = dateStrs.find(ds => {
             if (!offMap[rid].has(ds)) return false;
             if (reqLeaves.includes(ds)) return false;
             if (Math.abs(dateIdx[ds] - fi) <= 1) return false; // 인접 → 연속 off 방지
-            if (wouldCreate5Consec(ds)) return false;           // 이동 시 새 5연속 발생 방지
+            if (wouldCreateExcessConsec(ds)) return false;      // 이동 시 초과 연속 방지
             return true;
           });
           if (swapSrc) {
             unmarkOff(rid, swapSrc);
             markOff(rid, forceDs);
           } else {
-            issues.push({ level: 'warn', message: `${p.name}: 5연속 근무 발생 (이동 가능한 휴무 없음)` });
+            issues.push({ level: 'warn', message: `${p.name}: ${maxConsecWork + 1}연속 근무 발생 (이동 가능한 휴무 없음)` });
             continue;
           }
         }
@@ -545,8 +553,8 @@ export interface RetryValidationResult {
   checks: {
     dailyVariance: boolean;  // 일별 인원 편차 ±1 이내
     weeklyOff: boolean;      // 주간 휴무 2개 이상 (토~금)
-    consecWork: boolean;     // 연속 근무 3일 이하
-    consecOff: boolean;      // 연속 휴무 1일 이하
+    consecWork: boolean;     // 연속 근무 한계 이하 (패턴별: spread≤3, consecutive≤5)
+    consecOff: boolean;      // 연속 휴무 한계 이하 (패턴별: spread≤1, consecutive≤2)
   };
   attempts?: number;
 }
@@ -561,21 +569,32 @@ export function validateScheduleForRetry(
   let score    = 0;
   const checks = { dailyVariance: true, weeklyOff: true, consecWork: true, consecOff: true };
 
-  // 연속 근무/휴무 run 검사
+  // 전체 staff 목록 (패턴 조회용)
+  const allStaff = [
+    ...config.laundryStaff,
+    ...config.cleaningStaff,
+    ...(config.receivingStaff ?? []),
+  ];
+  const getPattern = (staffId: string) => allStaff.find(s => s.id === staffId)?.offPattern;
+
+  // 연속 근무/휴무 run 검사 — 패턴별 한계 적용
   const checkRuns = (ps: PersonSchedule) => {
+    const pattern = getPattern(ps.staffId);
+    const maxCW = pattern === 'consecutive' ? 5 : 3;  // 최대 연속 근무
+    const maxCO = pattern === 'consecutive' ? 2 : 1;  // 최대 연속 휴무
     let workRun = 0, offRun = 0;
     for (const ds of dstrs) {
       const status = ps.assignments[ds]?.status ?? 'work';
       if (status === 'work') {
         offRun = 0;
         workRun++;
-        if (workRun === 4) { checks.consecWork = false; score += 2; }
-        else if (workRun > 4) score += 2;
+        if (workRun === maxCW + 1) { checks.consecWork = false; score += 2; }
+        else if (workRun > maxCW + 1) score += 2;
       } else {
         workRun = 0;
         offRun++;
-        if (offRun === 2) { checks.consecOff = false; score += 1; }
-        else if (offRun > 2) score += 1;
+        if (offRun === maxCO + 1) { checks.consecOff = false; score += 1; }
+        else if (offRun > maxCO + 1) score += 1;
       }
     }
   };
