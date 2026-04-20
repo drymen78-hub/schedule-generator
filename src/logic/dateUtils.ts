@@ -21,19 +21,19 @@ export function dow(d: Date): number {
   return d.getDay();
 }
 
-/** 해당 월의 모든 날짜를 주 단위로 그룹핑 (금요일 기준으로 묶지 않고 그냥 7일 단위) */
+/** 해당 월의 모든 날짜를 주 단위로 그룹핑 (토요일 시작 ~ 금요일 종료) */
 export function groupByWeek(dates: Date[]): Date[][] {
   if (dates.length === 0) return [];
   const weeks: Date[][] = [];
   let week: Date[] = [];
 
-  // 첫 날부터 토요일까지를 1주로
+  // 토요일이 나오면 이전 그룹을 닫고 새 주 시작
   for (const d of dates) {
-    week.push(d);
-    if (dow(d) === 6 || d === dates[dates.length - 1]) {
+    if (dow(d) === 6 && week.length > 0) {
       weeks.push(week);
       week = [];
     }
+    week.push(d);
   }
   if (week.length > 0) weeks.push(week);
   return weeks;

@@ -76,7 +76,7 @@ function buildSheet(
       } else {
         offDays++;
         const isReq = a.status === 'requested';
-        return cell(isReq ? '희망휴무' : '휴무', true, isReq ? COLORS.requested : COLORS.off, '78350F');
+        return cell(isReq ? '휴무지정' : '휴무', true, isReq ? COLORS.requested : COLORS.off, '78350F');
       }
     });
 
@@ -103,7 +103,56 @@ function buildSheet(
   return ws;
 }
 
-export function downloadExcel(schedule: MonthSchedule, config: ScheduleConfig): void {
+function buildProductionSheet(productionData: Record<string, number>, dates: Date[]): XLSX.WorkSheet {
+  const aoa: any[][] = [];
+
+  aoa.push([
+    cell('날짜', true, COLORS.header, 'FFFFFF', false),
+    cell('요일', true, COLORS.header, 'FFFFFF'),
+    cell('생산량(개)', true, COLORS.header, 'FFFFFF'),
+  ]);
+
+  let total = 0, count = 0;
+  dates.forEach(d => {
+    const ds = toDateStr(d);
+    const qty = productionData[ds];
+    if (qty === undefined) return;
+    total += qty; count++;
+    const dayOfWeek = dow(d);
+    const isSat = dayOfWeek === 6, isSun = dayOfWeek === 0;
+    const bg = isSat ? COLORS.saturday : isSun ? COLORS.sunday : undefined;
+    const color = isSat ? '1D4ED8' : isSun ? 'DC2626' : '1E293B';
+    aoa.push([
+      cell(`${d.getMonth() + 1}/${d.getDate()}`, false, bg, color, false),
+      cell(getDayLabel(d), false, bg, color),
+      cell(qty.toLocaleString(), true, bg, color),
+    ]);
+  });
+
+  aoa.push([
+    cell('합계', true, COLORS.teamRow, '93C5FD', false),
+    cell(`${count}일`, false, COLORS.teamRow, '93C5FD'),
+    cell(total.toLocaleString(), true, COLORS.teamRow, 'FFFFFF'),
+  ]);
+  if (count > 0) {
+    aoa.push([
+      cell('일평균', true, { fgColor: { rgb: 'DCFCE7' } }, '15803D', false),
+      cell('', false, { fgColor: { rgb: 'DCFCE7' } }, '15803D'),
+      cell(Math.round(total / count).toLocaleString(), true, { fgColor: { rgb: 'DCFCE7' } }, '15803D'),
+    ]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 10 }, { wch: 6 }, { wch: 14 }];
+  ws['!rows'] = aoa.map(() => ({ hpt: 22 }));
+  return ws;
+}
+
+export function downloadExcel(
+  schedule: MonthSchedule,
+  config: ScheduleConfig,
+  productionData?: Record<string, number>,
+): void {
   const dates = getDatesInMonth(config.year, config.month);
   const wb = XLSX.utils.book_new();
 
@@ -112,6 +161,11 @@ export function downloadExcel(schedule: MonthSchedule, config: ScheduleConfig): 
 
   const cleaningWs = buildSheet(schedule.cleaning, config.cleaningStaff, dates, true, '👔 개별클리닝팀');
   XLSX.utils.book_append_sheet(wb, cleaningWs, '개별클리닝팀');
+
+  if (productionData && Object.keys(productionData).length > 0) {
+    const prodWs = buildProductionSheet(productionData, dates);
+    XLSX.utils.book_append_sheet(wb, prodWs, '생산량');
+  }
 
   const filename = `야간세탁_스케줄_${config.year}년${config.month}월.xlsx`;
   XLSX.writeFile(wb, filename);

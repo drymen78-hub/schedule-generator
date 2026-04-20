@@ -1,13 +1,21 @@
-export type TeamType = 'laundry' | 'cleaning';
-export type DayStatus = 'work' | 'off' | 'requested';   // requested = 희망휴무
-export type Position = 'classification' | 'machine' | 'wet' | 'dry' | 'qc' | 'pretreat';
+export type TeamType = 'laundry' | 'cleaning' | 'receiving';
+export type DayStatus = 'work' | 'off' | 'requested';   // requested = 휴무지정
+export type Position =
+  | 'classification' | 'machine' | 'wet' | 'dry' | 'qc' | 'pretreat'  // 개별클리닝
+  | 'recv_moving' | 'recv_rawwash' | 'recv_living' | 'recv_sort';       // 야간입고
+
+export type SkillLevel = 'high' | 'mid' | 'low';
+
+export type OffPattern = 'consecutive' | 'spread';  // 연속선호 | 분산선호
 
 export interface StaffMember {
   id: string;
   name: string;
   team: TeamType;
-  positions: Position[];          // 가능한 포지션 (우선순위 순)
-  mustWorkDays?: number[];        // 반드시 근무 요일 (0=일,1=월,...,6=토)
+  positions: Position[];
+  skillLevel?: SkillLevel;
+  part?: string;        // 야간입고팀: '관리자' | '1파트' | '2파트'
+  offPattern?: OffPattern; // 개인 휴무 패턴 선호
 }
 
 export interface PositionRequirement {
@@ -20,7 +28,7 @@ export interface PositionRequirement {
 
 export interface DayAssignment {
   status: DayStatus;
-  position?: Position;  // cleaning team 근무일에만
+  position?: Position;
 }
 
 export interface PersonSchedule {
@@ -33,6 +41,7 @@ export interface MonthSchedule {
   month: number;
   laundry: PersonSchedule[];
   cleaning: PersonSchedule[];
+  receiving?: PersonSchedule[];
   validationIssues: ValidationIssue[];
 }
 
@@ -40,13 +49,6 @@ export interface ValidationIssue {
   level: 'error' | 'warn';
   message: string;
 }
-
-/**
- * 전월 마지막 주 금/토 휴무 현황
- * 주52시간 준수를 위해 당월 첫 주 배정에 반영
- * key = staffId, value = 'fri' | 'sat' | 'both' | 'none'
- */
-export type PrevWeekOff = 'none' | 'fri' | 'sat' | 'both';
 
 export interface ScheduleConfig {
   year: number;
@@ -57,5 +59,11 @@ export interface ScheduleConfig {
   cleaningStaff: StaffMember[];
   positionRequirements: PositionRequirement[];
   requestedLeaves: Record<string, string[]>;    // staffId → 'YYYY-MM-DD'[]
-  prevMonthLastWeek?: Record<string, PrevWeekOff>; // staffId → 전월 마지막주 금/토 현황
+  requestedWorks:  Record<string, string[]>;    // staffId → 근무 지정일 'YYYY-MM-DD'[]
+  prevWeekNeeded?: Record<string, number>;
+  // ── 야간입고팀 ──────────────────────────────────────────────────────────────
+  receivingStaff?: StaffMember[];
+  receivingOffDays?: number;                       // 야간입고팀 월 휴무일수
+  receivingPositionRequirements?: PositionRequirement[];
+  receivingDailyTargets?: Record<number, number>;  // 0(일)~6(토) → 목표 근무 인원 (알고리즘용)
 }

@@ -31,3 +31,12 @@ button:active { transform: scale(0.97); }
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 6px rgba(0,0,0,0.07);
 }
+
+/* ── 모바일 반응형 ────────────────────────────── */
+@media (max-width: 768px) {
+  .staff-grid        { flex-direction: column !important; }
+  .position-grid     { grid-template-columns: repeat(2, 1fr) !important; }
+  .chart-grid        { grid-template-columns: 1fr !important; }
+  .leave-grid-3      { grid-template-columns: repeat(2, 1fr) !important; }
+  .leave-grid-4      { grid-template-columns: repeat(2, 1fr) !important; }
+}
