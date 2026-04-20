@@ -4,7 +4,8 @@ import {
   DEFAULT_LAUNDRY_STAFF, DEFAULT_CLEANING_STAFF, DEFAULT_POSITION_REQUIREMENTS,
   DEFAULT_RECEIVING_STAFF, DEFAULT_RECEIVING_POSITION_REQUIREMENTS, DEFAULT_RECEIVING_DAILY_TARGETS,
 } from '../constants/teams';
-import { generateSchedule, validateScheduleForRetry, RetryValidationResult } from '../logic/scheduler';
+import { generateSchedule, validateScheduleForRetry } from '../logic/scheduler';
+import type { RetryValidationResult } from '../logic/scheduler';
 import { downloadExcel } from '../logic/exporter';
 import { fetchConfig, pushConfig, fetchProduction, pushProduction, pushSchedule, fetchSchedule } from '../services/googleSheets';
 
